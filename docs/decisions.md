@@ -117,3 +117,27 @@ because this tool runs in the same environment.
   `/home/dvilyats/bin/dyna_py_venv` alongside PySide6. Pin a version
   range in `pyproject.toml`.
 - **Why:** User-confirmed.
+
+## D15 — scontrol show node access
+
+- **Decision:** `scontrol show node <name>` is permitted at this site. Use it directly; no fallback. Draw `RealMemory` ceiling for every visualised node.
+- **Why:** User-confirmed at site (Synopsys HPC cluster).
+- **Implication:** Removes the conditional fallback path described under "Remaining questions". Always call `scontrol show node`; cache result in SQLite `node_capacity` table.
+
+## D16 — Empty-plot placeholder
+
+- **Decision:** When a running job has not yet received its first sample, display the text **"Waiting for first sample …"** as a `pg.TextItem` inside each (initially empty) subplot.
+- **Why:** User-confirmed.
+- **Implication:** `MemoryPlotWindow.add_samples()` removes the placeholder `TextItem` on the first data point for each node.
+
+## D17 — Subplot grid wrap
+
+- **Decision:** Subplots are laid out in a grid, wrapped at **4 per row**.
+- **Why:** User-confirmed.
+- **Implication:** `MemoryPlotWindow._rebuild_layout()` places subplot `i` at row `i // 4`, column `i % 4` in the `pg.GraphicsLayoutWidget`.
+
+## D18 — Job picker scope *(supersedes D13)*
+
+- **Decision:** The picker shows **running jobs only** — `squeue -u $USER`. `sacct` is **not** queried; there is no past-jobs section.
+- **Why:** User-confirmed ("Running only, no need to check for past jobs for now").
+- **Implication:** `SlurmListWorker` is simplified to a single `squeue` call. D13's sacct reference is superseded.
