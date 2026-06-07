@@ -66,7 +66,6 @@ assumptions apply.
 | Source | Used for | Notes |
 | --- | --- | --- |
 | `squeue -u $USER -o ...` | List running jobs | Same format string family as `dynarun-gui/core/slurm.py`. |
-| `sacct -u $USER -S now-7days --format=JobID,JobName,State,Start,End` | List past jobs (≤ 7 days) | Default 7-day window already used by `dynarun-gui`. |
 | `sstat -j <jobid> -P --noheader --format=JobID,NodeList,MaxRSS` | **Live time series**, every N s | Only works while the step is running. Sampled by `MemSamplerWorker`. |
 | `scontrol show node <name>` | Per-node hardware memory ceiling | Parsed for `RealMemory=<MB>`. Cached once per node in SQLite. |
 | `sacct -j <jobid> --format=JobID,NodeList,MaxRSS` | MaxRSS-per-node for finished jobs we never sampled | Plotted as a single flat marker; no time series. |
@@ -157,13 +156,9 @@ Identical to `dynarun-gui` — same rules apply.
 
 1. **Launch.** `scripts/launch_gui.csh` sources the venv and runs
    `python -m slurm_mem_gui`.
-2. **Job picker.** `JobPickerDialog` opens. A `SlurmListWorker` runs once
-   at start (and on user *Refresh*):
-   - `squeue -u dvilyats ...` → running jobs section
-   - `sacct -u dvilyats -S now-7days ...` → past jobs section
+2. **Job picker.** `JobPickerDialog` opens. A `SlurmListWorker` runs once at start (and on user *Refresh*): `squeue -u dvilyats …` → running jobs only (D18). Double-click a row to select.
 
-   The combined table is shown (running first, then past). Double-click a
-   row to select. No free-text Job ID entry (decision **D13**).
+   No free-text Job ID entry (decision **D18**).
 3. **Plot window.** On selection, `MemoryPlotWindow` opens. For each node
    observed for that job, one subplot is created (decision **D9**), laid
    out side by side (wrapped at 4 per row for jobs spanning many nodes).
@@ -240,21 +235,3 @@ DB path: `~/.local/share/slurm-mem-gui/samples.db`
   that path already exists in `lsdyna-mes-parser/slurm_parser.py` and is
   *not* the OS RSS this tool plots.
 - Filling historical gaps for jobs we never sampled (decision **D6**).
-
-## Remaining questions (low-stakes, can be deferred)
-
-These are not blockers; sensible defaults are noted and can be revisited
-once the first version runs.
-
-- **`scontrol` access from the client.** Some sites restrict it. If
-  `scontrol show node <name>` is denied, fall back to drawing the
-  ceiling line at the *job allocation* (`--mem` from `scontrol show job`)
-  with a tooltip explaining the fallback. Default: try `scontrol show
-  node` first.
-- **Empty plot when nothing has been sampled yet for a *running* job:**
-  show a "waiting for first sample…" placeholder vs. an empty axes box.
-  Default: placeholder text.
-- **Subplot layout cap:** for jobs that ran on many nodes, do we wrap
-  into a grid or keep one horizontal row? Default: wrap at 4 per row.
-- **Job picker default sort:** running first then sacct by Start desc,
-  or unified by Start desc. Default: running first.
