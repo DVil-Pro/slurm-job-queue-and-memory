@@ -1,6 +1,8 @@
 """Parsers for SLURM memory strings and NodeList expressions."""
 from __future__ import annotations
 
+import re
+
 
 def parse_rss_to_kb(raw: str) -> int:
     """Convert a SLURM MaxRSS string to kilobytes (integer).
@@ -20,7 +22,25 @@ def parse_rss_to_kb(raw: str) -> int:
 
     Raises ValueError on unrecognised format or empty string.
     """
-    raise NotImplementedError
+    if not raw:
+        raise ValueError("Empty RSS string")
+
+    raw = raw.strip()
+    m = re.fullmatch(r'(\d+)([KkMmGg]?)', raw)
+    if not m:
+        raise ValueError(f"Unrecognised MaxRSS format: {raw!r}")
+
+    value = int(m.group(1))
+    suffix = m.group(2).upper()
+
+    if suffix in ('', 'K'):
+        return value
+    elif suffix == 'M':
+        return value * 1_024
+    elif suffix == 'G':
+        return value * 1_048_576
+    else:
+        raise ValueError(f"Unknown suffix {suffix!r} in MaxRSS: {raw!r}")
 
 
 def expand_node_list(node_list: str) -> list[str]:
@@ -42,4 +62,30 @@ def expand_node_list(node_list: str) -> list[str]:
     Does NOT handle multiple bracket groups on the same prefix
     (not needed for standard SLURM output).
     """
-    raise NotImplementedError
+    if not node_list:
+        return []
+
+    node_list = node_list.strip()
+
+    # Single prefix with a bracket expression, e.g. "node[01-03,05]"
+    bracket_match = re.match(r'^([^\[,]+)\[([^\]]+)\]$', node_list)
+    if bracket_match:
+        prefix = bracket_match.group(1)
+        range_str = bracket_match.group(2)
+        nodes: list[str] = []
+        for part in range_str.split(','):
+            part = part.strip()
+            if '-' in part:
+                start_s, end_s = part.split('-', 1)
+                width = len(start_s)  # infer zero-padding from start token
+                start = int(start_s)
+                end = int(end_s)
+                nodes.extend(f"{prefix}{i:0{width}d}" for i in range(start, end + 1))
+            else:
+                # single index token
+                width = len(part)
+                nodes.append(f"{prefix}{int(part):0{width}d}")
+        return nodes
+
+    # No brackets — plain comma-separated bare names
+    return [n.strip() for n in node_list.split(',') if n.strip()]

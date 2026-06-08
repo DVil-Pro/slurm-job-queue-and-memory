@@ -1,9 +1,9 @@
 """Worker that polls squeue for the job picker."""
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, Slot
 
-from slurm_mem_gui.core.slurm import RunningJob
+from slurm_mem_gui.core.slurm import RunningJob, list_running_jobs
 
 
 class SlurmListWorker(QObject):
@@ -29,6 +29,7 @@ class SlurmListWorker(QObject):
         super().__init__(parent)
         self._user = user
 
+    @Slot()
     def refresh(self) -> None:
         """Trigger a single squeue poll.
 
@@ -38,4 +39,8 @@ class SlurmListWorker(QObject):
 
         Emits :attr:`jobs_ready` on success or :attr:`error` on failure.
         """
-        raise NotImplementedError
+        try:
+            jobs: list[RunningJob] = list_running_jobs(self._user)
+            self.jobs_ready.emit(jobs)
+        except RuntimeError as exc:
+            self.error.emit(str(exc))

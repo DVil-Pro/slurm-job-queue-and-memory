@@ -6,8 +6,12 @@ unrecognised output.
 """
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime, timezone
+
+from slurm_mem_gui.core.memory_parser import expand_node_list, parse_rss_to_kb
 
 
 @dataclass
@@ -43,7 +47,36 @@ def list_running_jobs(user: str) -> list[RunningJob]:
     Returns an empty list when the user has no running jobs.
     Raises RuntimeError on non-zero squeue exit.
     """
-    raise NotImplementedError
+    cmd = ["squeue", "-u", user, "-h", "-t", "RUNNING", "-o", "%i|%j|%T|%S|%R"]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            f"squeue failed (exit {exc.returncode}): {exc.stderr.strip()}"
+        ) from exc
+
+    jobs: list[RunningJob] = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split("|", 4)
+        if len(parts) != 5:
+            continue
+        job_id, name, state, start, nodes = parts
+        jobs.append(RunningJob(
+            job_id=job_id.strip(),
+            name=name.strip(),
+            state=state.strip(),
+            start=start.strip(),
+            nodes=nodes.strip(),
+        ))
+    return jobs
 
 
 def sample_job_memory(job_id: str) -> list[SstatRow]:
@@ -62,7 +95,55 @@ def sample_job_memory(job_id: str) -> list[SstatRow]:
     produces no output for a pending or recently-finished job).
     Raises RuntimeError on non-zero sstat exit.
     """
-    raise NotImplementedError
+    cmd = [
+        "sstat",
+        "-j", job_id,
+        "-P",
+        "--noheader",
+        "--format=JobID,NodeList,MaxRSS",
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            f"sstat failed (exit {exc.returncode}): {exc.stderr.strip()}"
+        ) from exc
+
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Accumulate per-node maximum across all steps (D9)
+    node_max: dict[str, int] = {}
+
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split("|", 2)
+        if len(parts) != 3:
+            continue
+        _step_job_id, node_list_raw, rss_raw = parts
+
+        rss_raw = rss_raw.strip()
+        if not rss_raw or rss_raw == "0":
+            continue
+        try:
+            rss_kb = parse_rss_to_kb(rss_raw)
+        except ValueError:
+            continue
+
+        for node in expand_node_list(node_list_raw.strip()):
+            if node not in node_max or rss_kb > node_max[node]:
+                node_max[node] = rss_kb
+
+    return [
+        SstatRow(job_id=job_id, node=node, rss_kb=rss_kb, ts=ts)
+        for node, rss_kb in node_max.items()
+    ]
 
 
 def get_node_real_memory_kb(node: str) -> int:
@@ -78,4 +159,24 @@ def get_node_real_memory_kb(node: str) -> int:
     Raises RuntimeError if the node is not found or the output cannot
     be parsed.
     """
-    raise NotImplementedError
+    cmd = ["scontrol", "show", "node", node]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            f"scontrol failed for node {node!r} (exit {exc.returncode}): "
+            f"{exc.stderr.strip()}"
+        ) from exc
+
+    m = re.search(r'\bRealMemory=(\d+)\b', result.stdout)
+    if not m:
+        raise RuntimeError(
+            f"Could not find RealMemory in scontrol output for node {node!r}"
+        )
+    real_memory_mb = int(m.group(1))
+    return real_memory_mb * 1024
