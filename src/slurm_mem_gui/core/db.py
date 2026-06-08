@@ -62,11 +62,17 @@ class SampleDB:
 
     def open(self) -> None:
         """Create parent directories, open the SQLite connection, apply schema."""
-        raise NotImplementedError
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(str(self._path))
+        self._conn.executescript(SCHEMA)
+        self._conn.commit()
 
     def close(self) -> None:
         """Commit any pending transaction and close the connection."""
-        raise NotImplementedError
+        if self._conn is not None:
+            self._conn.commit()
+            self._conn.close()
+            self._conn = None
 
     def __enter__(self) -> "SampleDB":
         self.open()
@@ -74,6 +80,16 @@ class SampleDB:
 
     def __exit__(self, *_: object) -> None:
         self.close()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @property
+    def _db(self) -> sqlite3.Connection:
+        if self._conn is None:
+            raise RuntimeError("SampleDB is not open — call open() first.")
+        return self._conn
 
     # ------------------------------------------------------------------
     # job_samples
@@ -87,11 +103,21 @@ class SampleDB:
         The PRIMARY KEY ``(job_id, node, ts)`` prevents duplicates when
         the same tick is re-processed.
         """
-        raise NotImplementedError
+        self._db.execute(
+            "INSERT OR IGNORE INTO job_samples (job_id, node, ts, rss_kb) "
+            "VALUES (?, ?, ?, ?)",
+            (job_id, node, ts, rss_kb),
+        )
+        self._db.commit()
 
     def get_samples(self, job_id: str) -> list[tuple[str, str, int]]:
         """Return ``[(node, ts, rss_kb), ...]`` for *job_id*, ordered by ts asc."""
-        raise NotImplementedError
+        cur = self._db.execute(
+            "SELECT node, ts, rss_kb FROM job_samples "
+            "WHERE job_id = ? ORDER BY ts ASC",
+            (job_id,),
+        )
+        return [(row[0], row[1], row[2]) for row in cur.fetchall()]
 
     # ------------------------------------------------------------------
     # node_capacity
@@ -99,10 +125,20 @@ class SampleDB:
 
     def get_node_capacity(self, node: str) -> Optional[int]:
         """Return cached ``real_memory_kb`` for *node*, or ``None`` if not cached."""
-        raise NotImplementedError
+        cur = self._db.execute(
+            "SELECT real_memory_kb FROM node_capacity WHERE node = ?",
+            (node,),
+        )
+        row = cur.fetchone()
+        return row[0] if row is not None else None
 
     def set_node_capacity(
         self, node: str, real_memory_kb: int, seen_at: str
     ) -> None:
         """INSERT OR REPLACE node capacity entry."""
-        raise NotImplementedError
+        self._db.execute(
+            "INSERT OR REPLACE INTO node_capacity (node, real_memory_kb, seen_at) "
+            "VALUES (?, ?, ?)",
+            (node, real_memory_kb, seen_at),
+        )
+        self._db.commit()
